@@ -183,10 +183,12 @@ class GameController(object):
                         self.pacman.die()               
                         self.ghosts.hide()
                         if self.lives <= 0:
-                            self.textgroup.showText(GAMEOVERTXT)
-                            self.pause.setPause(pauseTime=3, func=self.restartGame)
+                            #self.textgroup.showText(GAMEOVERTXT)
+                            #self.pause.setPause(pauseTime=3, func=self.restartGame)
+                            self.restartGame()
                         else:
-                            self.pause.setPause(pauseTime=3, func=self.resetLevel)
+                            #self.pause.setPause(pauseTime=3, func=self.resetLevel)
+                            self.resetLevel()
     
     def checkFruitEvents(self):
         if self.pellets.numEaten == 50 or self.pellets.numEaten == 140:
