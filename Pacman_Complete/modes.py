@@ -1,8 +1,9 @@
 from constants import *
 
 class MainMode(object):
-    def __init__(self):
+    def __init__(self, speedModifier):
         self.timer = 0
+        self.speedModifier = speedModifier
         self.scatter()
 
     def update(self, dt):
@@ -15,12 +16,12 @@ class MainMode(object):
 
     def scatter(self):
         self.mode = SCATTER
-        self.time = 7
+        self.time = 7 / self.speedModifier
         self.timer = 0
 
     def chase(self):
         self.mode = CHASE
-        self.time = 20
+        self.time = 20 / self.speedModifier
         self.timer = 0
 
 
@@ -28,9 +29,10 @@ class ModeController(object):
     def __init__(self, entity):
         self.timer = 0
         self.time = None
-        self.mainmode = MainMode()
+        self.speedModifier = 1
+        self.mainmode = MainMode(self.speedModifier)
         self.current = self.mainmode.mode
-        self.entity = entity 
+        self.entity = entity
 
     def update(self, dt):
         self.mainmode.update(dt)
@@ -51,7 +53,7 @@ class ModeController(object):
     def setFreightMode(self):
         if self.current in [SCATTER, CHASE]:
             self.timer = 0
-            self.time = 7
+            self.time = 7 / self.speedModifier
             self.current = FREIGHT
         elif self.current is FREIGHT:
             self.timer = 0

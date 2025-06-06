@@ -33,6 +33,19 @@ class GameController(object):
         self.fruitCaptured = []
         self.fruitNode = None
         self.mazedata = MazeData()
+        self.episodes = 0 # Episodes here to keep track of it during learning
+        self.speedModifier = 1 # Speed modifier to speed up the game
+        self.episilon = 0.9 # qlearn parameter
+        self.learning = False # whether to learn or not
+
+    def setEpisodes(self, episodes):
+        self.episodes = episodes
+
+    def setLearning(self, learn):
+        self.learning = learn
+
+    def setEpsilon(self, value):
+        self.episilon = value
 
     def setBackground(self):
         self.background_norm = pygame.surface.Surface(SCREENSIZE).convert()
@@ -52,9 +65,21 @@ class GameController(object):
         self.mazedata.obj.setPortalPairs(self.nodes)
         self.mazedata.obj.connectHomeNodes(self.nodes)
         self.pellets = PelletGroup(self.mazedata.obj.name+".txt")
-        self.pacman = Pacman(self.nodes.getNodeFromTiles(*self.mazedata.obj.pacmanStart), self.pellets) # Edited to give pacman reference to the pellets and ghosts
+        self.pacman = Pacman(self.nodes.getNodeFromTiles(*self.mazedata.obj.pacmanStart), self.pellets, self.nodes, self.learning) # Edited to give pacman reference to the pellets and ghosts
         self.ghosts = GhostGroup(self.nodes.getStartTempNode(), self.pacman)
-        self.pacman.ghosts = self.ghosts
+        self.pacman.ghost_group = self.ghosts
+
+        self.pacman.speedModifier = self.speedModifier
+        self.pacman.set_epsilon(self.episilon)
+        self.pacman.setSpeed(100)
+        #self.pacman.setLearning(self.learning)
+        for ghost  in self.ghosts.ghosts:
+            ghost.speedModifier = self.speedModifier
+            ghost.mode.speedModifier = self.speedModifier
+            ghost.setSpeed(100)
+        
+        # also load the policy 
+        self.pacman.load_policy("policies/policy2.pkl")
 
         self.ghosts.pinky.setStartNode(self.nodes.getNodeFromTiles(*self.mazedata.obj.addOffset(2, 3)))
         self.ghosts.inky.setStartNode(self.nodes.getNodeFromTiles(*self.mazedata.obj.addOffset(0, 3)))
@@ -168,6 +193,7 @@ class GameController(object):
         for ghost in self.ghosts:
             if self.pacman.collideGhost(ghost):
                 if ghost.mode.current is FREIGHT:
+                    self.pacman.incrementReward(500)
                     self.pacman.visible = False
                     ghost.visible = False
                     self.updateScore(ghost.points)                  
@@ -222,14 +248,23 @@ class GameController(object):
         self.showEntities()
         self.level += 1
         self.pause.paused = True
+        self.pacman.incrementReward(500)
+        self.pacman.learn(self.pacman.state, self.pacman.direction, 0)
         self.startGame()
         self.textgroup.updateLevel(self.level)
+        self.pause.paused = False
 
     def restartGame(self):
         self.lives = 5
         self.level = 0
         self.pause.paused = True
         self.fruit = None
+
+        if self.pacman.learning:
+            self.pacman.save_policy("policies/policy2.pkl") 
+            self.pacman.decay_epsilon() # Decrease epsilon after each episode
+            self.episilon = self.pacman.epsilon
+
         self.startGame()
         self.score = 0
         self.textgroup.updateScore(self.score)
@@ -237,6 +272,15 @@ class GameController(object):
         self.textgroup.showText(READYTXT)
         self.lifesprites.resetLives(self.lives)
         self.fruitCaptured = []
+        if self.episodes > 0: 
+            self.episodes -= 1 # Decrement episodes after a game
+            print("RESTARTING, EPISODES LEFT: ", self.episodes)
+            self.textgroup.hideText()
+            self.pacman.set_epsilon(self.episilon)
+            print("EXPLORATION: ", self.pacman.epsilon)
+            self.pause.paused = False # Unpause game automatically
+        elif self.episodes == 0:
+            exit()
 
     def resetLevel(self):
         self.pause.paused = True
@@ -244,6 +288,8 @@ class GameController(object):
         self.ghosts.reset()
         self.fruit = None
         self.textgroup.showText(READYTXT)
+        self.textgroup.hideText()
+        self.pause.paused = False # Unpause game automatically 
 
     def updateScore(self, points):
         self.score += points
@@ -274,9 +320,27 @@ class GameController(object):
 
 if __name__ == "__main__":
     game = GameController()
+    speedModifier = 2
+    game.speedModifier = speedModifier
+    
+    learning = True
+    learnAndUsePolicy = True
+    episodes = 50
+    game.setLearning(learning)
+
     game.startGame()
+
+    # If we are learning
+    if learning:
+        game.setEpisodes(episodes)
+        if learnAndUsePolicy:
+            game.pacman.load_policy("policies/policy2.pkl")
+    else:
+        # If we're not learning, set the exploration parameter to 0, so we only use actions based on the learned q-values
+        game.setEpsilon(0.0)
+        game.pacman.load_policy("policies/policy2.pkl")
+
     while True:
         game.update()
-
-
-
+        #if game.episodes == 0 and learning:
+        #    game.pacman.save_policy("policies/policy2.pkl")
