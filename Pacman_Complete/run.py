@@ -65,20 +65,23 @@ class GameController(object):
         self.mazedata.obj.setPortalPairs(self.nodes)
         self.mazedata.obj.connectHomeNodes(self.nodes)
         self.pellets = PelletGroup(self.mazedata.obj.name+".txt")
-        self.pacman = Pacman(self.nodes.getNodeFromTiles(*self.mazedata.obj.pacmanStart), self.pellets, self.nodes, self.learning) # Edited to give pacman reference to the pellets and ghosts
+        self.pacman = Pacman(self.nodes.getNodeFromTiles(*self.mazedata.obj.pacmanStart), self.pellets, self.nodes, self.learning) # Edited to give pacman reference to the pellets and ghosts, and set whether to learn
         self.ghosts = GhostGroup(self.nodes.getStartTempNode(), self.pacman)
         self.pacman.ghost_group = self.ghosts
 
+        # Set pacman speed modifier, epsilon, and start state
         self.pacman.speedModifier = self.speedModifier
         self.pacman.set_epsilon(self.episilon)
         self.pacman.setSpeed(100)
-        #self.pacman.setLearning(self.learning)
+        self.pacman.setStartState()
+        
+        # Set the ghost's speed modifier
         for ghost  in self.ghosts.ghosts:
             ghost.speedModifier = self.speedModifier
             ghost.mode.speedModifier = self.speedModifier
             ghost.setSpeed(100)
         
-        # also load the policy 
+        # Load the policy between resets of pacman, so that he has the newest q-table available
         self.pacman.load_policy("policies/policy2.pkl")
 
         self.ghosts.pinky.setStartNode(self.nodes.getNodeFromTiles(*self.mazedata.obj.addOffset(2, 3)))
@@ -220,7 +223,7 @@ class GameController(object):
         if self.pellets.numEaten == 50 or self.pellets.numEaten == 140:
             if self.fruit is None:
                 self.fruit = Fruit(self.nodes.getNodeFromTiles(9, 20), self.level)
-                print(self.fruit)
+                #print(self.fruit)
         if self.fruit is not None:
             if self.pacman.collideCheck(self.fruit):
                 self.updateScore(self.fruit.points)
@@ -245,6 +248,7 @@ class GameController(object):
         self.ghosts.hide()
 
     def nextLevel(self):
+        print(f"OMG COMPLETED LVL {self.level}") # Just to notify whether a level was completed or not
         self.showEntities()
         self.level += 1
         self.pause.paused = True
@@ -260,6 +264,8 @@ class GameController(object):
         self.pause.paused = True
         self.fruit = None
 
+        # If we are learning, save the policy and decrease the epsilon parameter
+        # startGame() resets the pacman object, and thus we have to save the policy and load it again after each episode
         if self.pacman.learning:
             self.pacman.save_policy("policies/policy2.pkl") 
             self.pacman.decay_epsilon() # Decrease epsilon after each episode
@@ -272,14 +278,17 @@ class GameController(object):
         self.textgroup.showText(READYTXT)
         self.lifesprites.resetLives(self.lives)
         self.fruitCaptured = []
-        if self.episodes > 0: 
+        if self.episodes > 0: # If there are episodes left, restart the game
             self.episodes -= 1 # Decrement episodes after a game
             print("RESTARTING, EPISODES LEFT: ", self.episodes)
             self.textgroup.hideText()
             self.pacman.set_epsilon(self.episilon)
             print("EXPLORATION: ", self.pacman.epsilon)
             self.pause.paused = False # Unpause game automatically
-        elif self.episodes == 0:
+        elif self.level == 0:
+            self.textgroup.hideText()
+            self.pause.paused = False # Unpause game automatically
+        elif self.episodes == 0: # Otherwise, quit
             exit()
 
     def resetLevel(self):
@@ -320,27 +329,25 @@ class GameController(object):
 
 if __name__ == "__main__":
     game = GameController()
-    speedModifier = 2
+    speedModifier = 3 # Speed modifier to accelerate the speed of the enities
     game.speedModifier = speedModifier
     
-    learning = True
+    learning = False
+    runUntilWin = True
     learnAndUsePolicy = True
     episodes = 50
     game.setLearning(learning)
 
+    if not learning: game.setEpsilon(0.0) # If we're not learning, set the exploration parameter to 0, so we only use actions based on the learned q-values
     game.startGame()
 
     # If we are learning
     if learning:
         game.setEpisodes(episodes)
-        if learnAndUsePolicy:
+        if learnAndUsePolicy: # If we are learning based on a previously learned policy
             game.pacman.load_policy("policies/policy2.pkl")
     else:
-        # If we're not learning, set the exploration parameter to 0, so we only use actions based on the learned q-values
-        game.setEpsilon(0.0)
         game.pacman.load_policy("policies/policy2.pkl")
 
     while True:
         game.update()
-        #if game.episodes == 0 and learning:
-        #    game.pacman.save_policy("policies/policy2.pkl")

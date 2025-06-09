@@ -24,20 +24,23 @@ class Pacman(Entity):
         
         # Q-learning parameters
         self.q_table = {}
-        self.alpha = 0.1  # Learning rate
-        self.gamma = 0.9  # Discount factor
+        self.alpha = 0.5  # Learning rate
+        self.gamma = 1  # Discount factor
         self.epsilon = 0.9  # Exploration rate
         self.epsilon_min = 0.1  # Minimum exploration rate
         self.decay_rate = 0.99  # Decay rate per episode
         self.rng = np.random.default_rng()  # Random number generator
         self.reward = 0 # Reward to be given during learning
         self.learning = learning
-        self.state = None
 
         # Reference to the pellets and ghosts
         self.pellets : PelletGroup = pellet_group
         self.ghost_group : GhostGroup = ghosts
         self.nodes : NodeGroup = nodes
+
+        # Holds the previous state and action to use when learning
+        self.state = None
+        self.prev_dir = self.direction
 
     def set_epsilon(self, value):
         """
@@ -47,7 +50,7 @@ class Pacman(Entity):
 
     def decay_epsilon(self):
         """
-        Decays the epsilon value exponentially after each episode.
+        Gradually reduces the epsilon / exploration parameter
         """
         self.epsilon = max(self.epsilon * self.decay_rate, self.epsilon_min)
 
@@ -64,7 +67,6 @@ class Pacman(Entity):
             max_q_value = max(q_values)
             # In case of multiple max values, randomly select one
             max_indices = [i for i, q in enumerate(q_values) if q == max_q_value]
-            print(f"Going {max_indices} with Q-Value: {max_q_value}")
             return available_actions[self.rng.choice(max_indices)]
 
     def get_q_value(self, state, action):
@@ -77,44 +79,19 @@ class Pacman(Entity):
             self.q_table[(state, action)] = 0
         return self.q_table[(state, action)]
 
-    def learn(self, state, action, next_state):
-
-        # Capture state with pacmans pos, nearest pellet and ghost's positions and their threat level (flee or not)
-        # Is pacman powered or not? (can kill ghosts)
-        # Rewards:
-        # Moving to a node : -10, to enourage NOT moving around in circles
-        # Getting a pellet : +10
-        # Getting a power pellet : +50
-        # Killing a ghost : +500
-        # Dying to a ghost : -100
-        # Winning a level : +500
-        # Losing a level or dying: -500
-
-        # Find the available directions for pacmans target node (Node he's moving towards)
+    def learn(self, prev_state, action, curr_state):        
+        # Calculate q-value, inspired heavily by the function from the exercises
         max_future_reward = 0
-        if next_state:
-            next_available_actions = self.get_directions_for_target(self.nodes.getNodeFromPixels(next_state[1][0], next_state[1][1]))
-            max_future_reward = max([self.get_q_value(next_state, action) for action in next_available_actions])
-        current_q_value = self.get_q_value(state, action)
-        self.q_table[(state, action)] = current_q_value + self.alpha * (
+        if curr_state:
+            next_available_actions = self.validDirections()
+            max_future_reward = max([self.get_q_value(curr_state, action) for action in next_available_actions])
+        current_q_value = self.get_q_value(prev_state, action)
+        self.q_table[(prev_state, action)] = current_q_value + self.alpha * (
             self.reward + self.gamma * max_future_reward - current_q_value
             )
-        #print(f"Updating Q-Table with state: {state}, action: {action}, Q-Value: {self.get_q_value(state, action)}")
-        #print(f"Learning with reward:{self.reward}")
         self.reward = 0
 
-    def get_directions_for_target(self, target : Node):
-        """
-        Return available directions for the given target. Used for getting the next state
-        """
-        actions = []
-        for direction in self.directions:
-            if direction is not STOP and self.name in target.access[direction]:
-                    if target.neighbors[direction] is not None:
-                        actions.append(direction)
-        
-        return actions
-
+    # Save and load policy, taken from the exercises
     def save_policy(self, filename):
         with open(filename, "wb") as f:
             pickle.dump(self.q_table, f)
@@ -135,25 +112,17 @@ class Pacman(Entity):
         """
         self.reward += value
 
-    def reset(self):
-        Entity.reset(self)
-        self.direction = LEFT
-        self.setBetweenNodes(LEFT)
-        self.alive = True
-        self.image = self.sprites.getStartImage()
-        self.sprites.reset()
-
-    def die(self):
-        self.alive = False
-        self.direction = STOP
-        # Learn when pacman dies
-        if self.learning:
-            self.reward -= 500
-            self.learn(self.state, self.direction, 0)
-
-    def update(self, dt):	
-        self.sprites.update(dt)
-        self.position += self.directions[self.direction]*self.speed*dt
+    def getNewState(self):
+        """
+        Calculates and returns the current state
+        """
+        # Rewards:
+        # Moving to a node : -10, to enourage NOT moving around in circles
+        # Getting a pellet : +10
+        # Getting a power pellet : +50
+        # Killing a ghost : +500
+        # Dying to a ghost : -500, High so that we nullify any other positive rewards we got before dying
+        # Winning a level : +500
 
         #### Update State ####
         # Find closest pellet to pacman
@@ -170,7 +139,7 @@ class Pacman(Entity):
         closest_pellet = (self.pellets.pelletList + self.pellets.powerpellets)[closest_pellet_idx]
         closest_pellet = (closest_pellet.position.x, closest_pellet.position.y)
 
-        # Check through the ghosts and their position and threat level
+        # Check through the ghost's position and threat level
         ghost_threats = []
         blinky_pos = tuple()
         pinky_pos = tuple()
@@ -179,26 +148,53 @@ class Pacman(Entity):
         for ghost in self.ghost_group.ghosts:
             ghost_threats.append(ghost.mode.current)
             if ghost.name == BLINKY:
-                blinky_pos = (round(ghost.position.x), round(ghost.position.y))
+                blinky_pos = (round(ghost.node.position.x), round(ghost.node.position.y)) # We round to only store integer values of positions
             elif ghost.name == PINKY:
-                pinky_pos = (round(ghost.position.x), round(ghost.position.y))
+                pinky_pos = (round(ghost.node.position.x), round(ghost.node.position.y))
             elif ghost.name == INKY:
-                inky_pos = (round(ghost.position.x), round(ghost.position.y))
+                inky_pos = (round(ghost.node.position.x), round(ghost.node.position.y))
             elif ghost.name == CLYDE:
-                clyde_pos = (round(ghost.position.x), round(ghost.position.y))
+                clyde_pos = (round(ghost.node.position.x), round(ghost.node.position.y))
 
         threat_level = tuple(ghost_threats)
-        pacman_pos = (round(self.position.x), round(self.position.y))
-        pacman_target = (self.target.position.x, self.target.position.y)
-        new_state = tuple([pacman_pos, pacman_target, threat_level, closest_pellet, blinky_pos, pinky_pos, inky_pos, clyde_pos])
-        self.state = new_state
+        pacman_pos = (round(self.node.position.x), round(self.node.position.y))  
+        new_state = tuple([pacman_pos, threat_level, closest_pellet, blinky_pos, pinky_pos, inky_pos, clyde_pos])
         ### Finish updating state ###
+        return new_state
+    
+    def setStartState(self):
+        """
+        Sets the starting state of pacman
+        """
+        self.state = self.getNewState()
 
-        # Choose a direction based on the state and the available directions
-        direction = self.choose_action(self.state, self.validDirections())
+    def reset(self):
+        Entity.reset(self)
+        self.direction = LEFT
+        self.setBetweenNodes(LEFT)
+        self.alive = True
+        self.image = self.sprites.getStartImage()
+        self.sprites.reset()
+
+    def die(self):
+        # Learn when pacman dies
+        if self.learning:
+            self.reward -= 500
+            self.learn(self.state, self.direction, 0) # Current state is 0, which means max future reward will be 0
+        self.alive = False
+        self.direction = STOP
+
+    def update(self, dt):	
+        self.sprites.update(dt)
+        self.position += self.directions[self.direction]*self.speed*dt
 
         if self.overshotTarget():
+            # Choose a direction based on the new state and the available directions
+            # We do it after the node has been set, so that the available directions are based on the node we just reached
             self.node = self.target
+            new_state = self.getNewState()
+            direction = self.choose_action(new_state, self.validDirections())
+
             if self.node.neighbors[PORTAL] is not None:
                 self.node = self.node.neighbors[PORTAL]
             self.target = self.getNewTarget(direction)
@@ -212,24 +208,21 @@ class Pacman(Entity):
             self.setPosition()
 
             # Learn when reaching a new node
-            if self.learning:
+            if self.learning and new_state != self.state and self.prev_dir != STOP:
                 self.reward -= 10
-                #pacman_pos = (round(self.position.x), round(self.position.y))
-                pacman_target = (self.target.position.x, self.target.position.y)
-                #estimate_next_state = tuple([pacman_pos, pacman_target, threat_level, closest_pellet, blinky_pos, pinky_pos, inky_pos, clyde_pos])
-                blinky_pos_future = (self.ghost_group.ghosts[0].target.position.x, self.ghost_group.ghosts[0].target.position.y)
-                pinky_pos_future = (self.ghost_group.ghosts[1].target.position.x, self.ghost_group.ghosts[1].target.position.y)
-                inky_pos_future = (self.ghost_group.ghosts[2].target.position.x, self.ghost_group.ghosts[2].target.position.y)
-                clyde_pos_future = (self.ghost_group.ghosts[3].target.position.x, self.ghost_group.ghosts[3].target.position.y)
-                estimate_next_state = tuple([pacman_pos, pacman_target, threat_level, closest_pellet, blinky_pos_future, pinky_pos_future, inky_pos_future, clyde_pos_future])
-                self.learn(self.state, direction, estimate_next_state)
-        else: 
-            if self.oppositeDirection(direction):
-                self.reverseDirection()
+                # self.state is the state we had on the previous node
+                # self.prev_dir is the direction we took from self.state to get to new_state
+                # new_state is the current state
+                self.learn(self.state, self.prev_dir, new_state)
+            # Update the state attribute to hold the current state
+            self.state = new_state
+            # Update prev_dir to hold the new direction, that goes to some new node
+            self.prev_dir = self.direction
 
     def eatPellets(self, pelletList):
         for pellet in pelletList:
             if self.collideCheck(pellet):
+                # give rewards based on the pellet type
                 if pellet.name == POWERPELLET:
                     self.reward += 50
                 if pellet.name == PELLET:
