@@ -37,6 +37,7 @@ class GameController(object):
         self.speedModifier = 1 # Speed modifier to speed up the game
         self.episilon = 0.9 # qlearn parameter
         self.learning = False # whether to learn or not
+        self.runUntilWin = False
 
     def setEpisodes(self, episodes):
         self.episodes = episodes
@@ -46,6 +47,9 @@ class GameController(object):
 
     def setEpsilon(self, value):
         self.episilon = value
+    
+    def setRunUntilWin(self, value):
+        self.runUntilWin = value
 
     def setBackground(self):
         self.background_norm = pygame.surface.Surface(SCREENSIZE).convert()
@@ -285,7 +289,7 @@ class GameController(object):
             self.pacman.set_epsilon(self.episilon)
             print("EXPLORATION: ", self.pacman.epsilon)
             self.pause.paused = False # Unpause game automatically
-        elif self.level == 0:
+        elif self.level == 0 and self.runUntilWin:
             self.textgroup.hideText()
             self.pause.paused = False # Unpause game automatically
         elif self.episodes == 0: # Otherwise, quit
@@ -332,11 +336,12 @@ if __name__ == "__main__":
     speedModifier = 3 # Speed modifier to accelerate the speed of the enities
     game.speedModifier = speedModifier
     
-    learning = False
-    runUntilWin = True
+    learning = True
+    runUntilWin = False
     learnAndUsePolicy = True
     episodes = 50
     game.setLearning(learning)
+    game.setRunUntilWin(runUntilWin)
 
     if not learning: game.setEpsilon(0.0) # If we're not learning, set the exploration parameter to 0, so we only use actions based on the learned q-values
     game.startGame()
